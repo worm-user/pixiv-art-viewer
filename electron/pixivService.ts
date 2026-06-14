@@ -12,6 +12,7 @@ const API_BASE = 'https://app-api.pixiv.net'
 const USER_AGENT = 'PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)'
 
 let accessToken = ''
+let loggedInUserId: number | null = null
 
 function getHeaders() {
   const time = new Date().toISOString()
@@ -55,8 +56,35 @@ export async function loginWithRefreshToken(refreshToken: string) {
 
   const json = await response.json()
   accessToken = json.access_token
+  if (json.user && json.user.id) {
+    loggedInUserId = Number(json.user.id)
+  }
   console.log('[pixiv-service] Access token refreshed successfully')
   return json
+}
+
+export async function getFollowing() {
+  if (!loggedInUserId) throw new Error("Not logged in")
+  
+  let following: any[] = []
+  let url: string | null = `${API_BASE}/v1/user/following?user_id=${loggedInUserId}&restrict=public`
+  
+  for (let i = 0; i < 5 && url; i++) {
+    const res = await fetch(url, { headers: getHeaders() })
+    if (!res.ok) break;
+    const data: any = await res.json()
+    if (data.user_previews) {
+      following = following.concat(data.user_previews.map((item: any) => ({
+        id: item.user.id,
+        name: item.user.name,
+        account: item.user.account,
+        profileImage: item.user.profile_image_urls?.medium || item.user.profile_image_urls?.large || ''
+      })))
+    }
+    url = data.next_url ? data.next_url : null
+  }
+  
+  return following
 }
 
 export async function getUserWorks(userId: number) {

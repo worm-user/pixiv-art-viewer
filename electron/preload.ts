@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   loadToken: () => ipcRenderer.invoke('load-token'),
   saveToken: (token: string) => ipcRenderer.invoke('save-token', token),
   fetchUserWorks: (refreshToken: string, userId: number) => ipcRenderer.invoke('fetch-user-works', refreshToken, userId),
+  getFollowing: (refreshToken: string) => ipcRenderer.invoke('get-following', refreshToken),
   downloadImage: (url: string, filename: string) => ipcRenderer.invoke('download-image', url, filename),
   listLocalImages: () => ipcRenderer.invoke('list-local-images'),
   listOllamaModels: () => ipcRenderer.invoke('list-ollama-models'),

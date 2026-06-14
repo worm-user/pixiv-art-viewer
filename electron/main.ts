@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, protocol, clipboard, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, clipboard, nativeImage, shell, session } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { openPixivLoginWindow } from './pixivAuth'
-import { loginWithRefreshToken, getUserWorks, downloadImage } from './pixivService'
+import { loginWithRefreshToken, getUserWorks, downloadImage, getFollowing } from './pixivService'
 import { ensureModelAndAnalyze } from './aiService'
 import { extractColors } from './imageService'
 import { fileURLToPath } from 'url'
@@ -80,6 +80,15 @@ app.whenReady().then(() => {
     return new Response('', { status: 200 })
   })
 
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['*://*.pximg.net/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://app-api.pixiv.net/'
+      details.requestHeaders['User-Agent'] = 'PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)'
+      callback({ requestHeaders: details.requestHeaders })
+    }
+  )
+
   const getPicturesPath = () => path.join(app.getPath('pictures'), 'PixivReference')
 
   // Setup IPC handlers
@@ -105,6 +114,11 @@ app.whenReady().then(() => {
   ipcMain.handle('fetch-user-works', async (_, refreshToken: string, userId: number) => {
     await loginWithRefreshToken(refreshToken)
     return await getUserWorks(userId)
+  })
+
+  ipcMain.handle('get-following', async (_, refreshToken: string) => {
+    await loginWithRefreshToken(refreshToken)
+    return await getFollowing()
   })
 
   ipcMain.handle('download-image', async (_, url: string, filename: string) => {
