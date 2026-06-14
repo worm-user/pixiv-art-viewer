@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Copy, Pipette, Zap, Palette } from 'lucide-react'
+import { Copy, Zap, Palette } from 'lucide-react'
 
 export default function ImageViewer({ filename, picturesPath }: { filename: string, picturesPath: string }) {
   const [tags, setTags] = useState<{danbooru: string, style: string} | null>(null)
@@ -9,9 +9,46 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   const [taggingStatus, setTaggingStatus] = useState('')
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [selectedModel, setSelectedModel] = useState<string>('qwen2-vl')
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [magnifier, setMagnifier] = useState<{ x: number, y: number, natX: number, natY: number } | null>(null)
 
   const imageUrl = `file://${picturesPath}\\${filename}`
+
+  useEffect(() => {
+    let isMounted = true;
+    canvasRef.current = null;
+    const loadCanvas = async () => {
+      try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+        if (!isMounted) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0);
+          canvasRef.current = canvas;
+        }
+      } catch (e) {
+        console.error("Failed to load image for eyedropper", e);
+      }
+    };
+    loadCanvas();
+    return () => { isMounted = false; };
+  }, [imageUrl]);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg)
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    timeoutRef.current = setTimeout(() => {
+      setToastMessage(null)
+    }, 2500)
+  }
 
   useEffect(() => {
     setTags(null)
@@ -48,27 +85,56 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
       await navigator.clipboard.write([
         new ClipboardItem({ [blob.type]: blob })
       ])
-      alert('Copied to clipboard!')
+      showToast('Copied image to clipboard!')
     } catch (e) {
       console.error(e)
-      alert('Failed to copy image.')
+      showToast('Failed to copy image.')
     }
   }
 
-  const useEyedropper = async () => {
-    // @ts-ignore
-    if (!window.EyeDropper) {
-      alert('EyeDropper API is not supported in this environment.')
-      return
+  const handleMouseMove = (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!imageRef.current || !canvasRef.current) return;
+    const rect = imageRef.current.getBoundingClientRect();
+    const imgRatio = imageRef.current.naturalWidth / imageRef.current.naturalHeight;
+    const containerRatio = rect.width / rect.height;
+    
+    let renderWidth, renderHeight, xOffset, yOffset;
+    if (containerRatio > imgRatio) {
+      renderHeight = rect.height;
+      renderWidth = rect.height * imgRatio;
+      xOffset = (rect.width - renderWidth) / 2;
+      yOffset = 0;
+    } else {
+      renderWidth = rect.width;
+      renderHeight = rect.width / imgRatio;
+      xOffset = 0;
+      yOffset = (rect.height - renderHeight) / 2;
     }
+    
+    const x = e.clientX - rect.left - xOffset;
+    const y = e.clientY - rect.top - yOffset;
+    
+    if (x >= 0 && x <= renderWidth && y >= 0 && y <= renderHeight) {
+      const natX = Math.floor((x / renderWidth) * imageRef.current.naturalWidth);
+      const natY = Math.floor((y / renderHeight) * imageRef.current.naturalHeight);
+      setMagnifier({ x: e.clientX, y: e.clientY, natX, natY });
+    } else {
+      setMagnifier(null);
+    }
+  }
+
+  const handleImageClick = async () => {
+    if (!magnifier || !canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    if (!ctx) return;
+    const pixel = ctx.getImageData(magnifier.natX, magnifier.natY, 1, 1).data;
+    const hex = "#" + [pixel[0], pixel[1], pixel[2]].map(x => x.toString(16).padStart(2, '0')).join('');
+    
     try {
-      // @ts-ignore
-      const eyeDropper = new window.EyeDropper()
-      const result = await eyeDropper.open()
-      await navigator.clipboard.writeText(result.sRGBHex)
-      alert(`Copied ${result.sRGBHex} to clipboard!`)
+      await navigator.clipboard.writeText(hex);
+      showToast(`Copied color ${hex}`);
     } catch (e) {
-      // User canceled
+      console.error(e);
     }
   }
 
@@ -107,23 +173,80 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   }
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100%' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
+      {toastMessage && (
+        <div style={{
+          position: 'absolute',
+          bottom: '40px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#000',
+          color: '#fff',
+          padding: '10px 20px',
+          borderRadius: '0',
+          zIndex: 1000,
+          pointerEvents: 'none',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          fontSize: '14px',
+          fontWeight: 500,
+          border: '1px solid #333'
+        }}>
+          {toastMessage}
+        </div>
+      )}
+
+      {magnifier && canvasRef.current && (
+        <div style={{
+          position: 'fixed',
+          left: magnifier.x - 50,
+          top: magnifier.y - 50,
+          width: 100,
+          height: 100,
+          borderRadius: '50%',
+          border: '2px solid #000',
+          pointerEvents: 'none',
+          backgroundImage: `url("${imageUrl.replace(/\\/g, '/')}")`,
+          backgroundSize: `${canvasRef.current.width * 10}px ${canvasRef.current.height * 10}px`,
+          backgroundPosition: `${-(magnifier.natX * 10 + 5 - 50)}px ${-(magnifier.natY * 10 + 5 - 50)}px`,
+          zIndex: 9999,
+          imageRendering: 'pixelated',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          backgroundRepeat: 'no-repeat'
+        }}>
+          <div style={{
+            position: 'absolute',
+            left: '50%', top: '50%',
+            width: 10, height: 10,
+            transform: 'translate(-50%, -50%)',
+            border: '1px solid #000',
+            boxSizing: 'border-box'
+          }} />
+        </div>
+      )}
+
       <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', overflow: 'hidden' }}>
         <img 
           ref={imageRef}
           src={imageUrl} 
           alt={filename} 
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setMagnifier(null)}
+          onClick={handleImageClick}
+          style={{ 
+            maxWidth: '100%', 
+            maxHeight: '100%', 
+            objectFit: 'contain', 
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            cursor: canvasRef.current ? 'none' : 'default'
+          }}
         />
       </div>
 
       <div style={{ width: '300px', background: 'var(--panel-bg)', borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '8px' }}>
-          <button onClick={copyToClipboard} title="Copy to Clipboard" style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+          <button onClick={copyToClipboard} title="Copy image to Clipboard" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
             <Copy size={16} />
-          </button>
-          <button onClick={useEyedropper} title="Eyedropper" style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-            <Pipette size={16} />
+            <span style={{ fontSize: '13px' }}>Copy Image</span>
           </button>
         </div>
 
