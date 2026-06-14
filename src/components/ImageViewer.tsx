@@ -14,10 +14,14 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   const imageRef = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [magnifier, setMagnifier] = useState<{ x: number, y: number, natX: number, natY: number } | null>(null)
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStart = useRef({ x: 0, y: 0 })
 
   const imageUrl = `file://${picturesPath}\\${filename}`
 
   useEffect(() => {
+    setTransform({ x: 0, y: 0, scale: 1 });
     let isMounted = true;
     canvasRef.current = null;
     const loadCanvas = async () => {
@@ -92,7 +96,57 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     }
   }
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLImageElement>) => {
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const zoomSensitivity = 0.002;
+    const delta = -e.deltaY * zoomSensitivity;
+    const ratio = 1 + delta;
+    const newScale = Math.max(0.1, Math.min(transform.scale * ratio, 50));
+    
+    const rect = imageRef.current?.getBoundingClientRect();
+    if (rect) {
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+
+      const scaleRatio = newScale / transform.scale;
+      const newX = transform.x - dx * (scaleRatio - 1);
+      const newY = transform.y - dy * (scaleRatio - 1);
+
+      setTransform({ x: newX, y: newY, scale: newScale });
+    }
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0) { // left click
+      setIsDragging(true);
+      dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    }
+  }
+
+  const handleMouseUp = (e: React.MouseEvent) => {
+    if (e.button === 0) {
+      setIsDragging(false);
+    }
+  }
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (e.button === 0) {
+      setTransform({ x: 0, y: 0, scale: 1 });
+    }
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isDragging) {
+      setTransform(prev => ({
+        ...prev,
+        x: e.clientX - dragStart.current.x,
+        y: e.clientY - dragStart.current.y
+      }));
+      setMagnifier(null);
+      return;
+    }
+
     if (!imageRef.current || !canvasRef.current) return;
     const rect = imageRef.current.getBoundingClientRect();
     const imgRatio = imageRef.current.naturalWidth / imageRef.current.naturalHeight;
@@ -195,7 +249,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
         </div>
       )}
 
-      {magnifier && canvasRef.current && (
+      {magnifier && canvasRef.current && !isDragging && (
         <div style={{
           position: 'fixed',
           left: magnifier.x - 50,
@@ -224,20 +278,38 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
         </div>
       )}
 
-      <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', overflow: 'hidden' }}>
+      <div 
+        style={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          background: 'var(--bg-color)', 
+          overflow: 'hidden',
+          cursor: isDragging ? 'grabbing' : (magnifier ? 'none' : 'grab')
+        }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={(e) => { handleMouseUp(e); setMagnifier(null); }}
+        onContextMenu={(e) => { e.preventDefault(); handleImageClick(); }}
+        onDoubleClick={handleDoubleClick}
+      >
         <img 
           ref={imageRef}
           src={imageUrl} 
           alt={filename} 
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => setMagnifier(null)}
-          onClick={handleImageClick}
+          draggable={false}
           style={{ 
             maxWidth: '100%', 
             maxHeight: '100%', 
             objectFit: 'contain', 
             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-            cursor: canvasRef.current ? 'none' : 'default'
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+            transformOrigin: 'center',
+            pointerEvents: 'none'
           }}
         />
       </div>
