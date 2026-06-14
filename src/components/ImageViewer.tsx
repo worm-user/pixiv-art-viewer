@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Copy, Zap, Palette } from 'lucide-react'
+import { Copy, Zap, Palette, Pin } from 'lucide-react'
 
 export default function ImageViewer({ filename, picturesPath }: { filename: string, picturesPath: string }) {
   const [tags, setTags] = useState<{danbooru: string, style: string} | null>(null)
-  const [colors, setColors] = useState<Record<string, string>>({})
+  const [colors, setColors] = useState<Array<{id: string, name: string, hex: string, isPinned: boolean}>>([])
+  const [columns, setColumns] = useState(2)
   const [analyzing, setAnalyzing] = useState(false)
   const [tagging, setTagging] = useState(false)
   const [taggingStatus, setTaggingStatus] = useState('')
@@ -22,7 +23,24 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
 
   useEffect(() => {
     setTransform({ x: 0, y: 0, scale: 1 });
+    setColors([]);
+    setTags(null);
     let isMounted = true;
+    
+    // Auto-extract colors
+    // @ts-ignore
+    window.api.extractColors(filename).then((res: Record<string, string>) => {
+      if (!isMounted) return;
+      const initialColors = Object.entries(res)
+        .filter(([_, hex]) => hex)
+        .map(([name, hex]) => ({ id: Math.random().toString(), name, hex, isPinned: false }));
+      
+      setColors(prev => {
+        const maxColors = columns * 3;
+        return initialColors.slice(0, maxColors);
+      });
+    }).catch(console.error);
+
     canvasRef.current = null;
     const loadCanvas = async () => {
       try {
@@ -55,8 +73,6 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   }
 
   useEffect(() => {
-    setTags(null)
-    setColors({})
     setTaggingStatus('')
 
     // @ts-ignore
@@ -187,9 +203,40 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     try {
       await navigator.clipboard.writeText(hex);
       showToast(`Copied color ${hex}`);
+      setColors(prev => {
+        if (prev.some(c => c.hex.toLowerCase() === hex.toLowerCase())) return prev;
+        
+        const newColor = { id: Math.random().toString(), name: 'Picked', hex, isPinned: false };
+        let next = [...prev, newColor];
+        const maxColors = columns * 3;
+        
+        if (next.length > maxColors) {
+          const excess = next.length - maxColors;
+          const unpinnedIndices = next
+            .map((c, i) => (!c.isPinned && i < next.length - 1 ? i : -1))
+            .filter(i => i !== -1);
+          
+          let toRemove = unpinnedIndices.slice(0, excess);
+          return next.filter((_, i) => !toRemove.includes(i));
+        }
+        return next;
+      });
     } catch (e) {
       console.error(e);
     }
+  }
+
+  const handleColorClick = async (hex: string) => {
+    try {
+      await navigator.clipboard.writeText(hex);
+      showToast(`Copied color ${hex}`);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  const togglePin = (id: string) => {
+    setColors(prev => prev.map(c => c.id === id ? { ...c, isPinned: !c.isPinned } : c));
   }
 
   const extractColors = async () => {
@@ -197,7 +244,12 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     try {
       // @ts-ignore
       const res = await window.api.extractColors(filename)
-      setColors(res)
+      const newColors = Object.entries(res).filter(([_, hex]) => hex).map(([name, hex]) => ({ id: Math.random().toString(), name, hex, isPinned: false }));
+      
+      setColors(prev => {
+        const maxColors = columns * 3;
+        return newColors.slice(0, maxColors);
+      });
     } catch (e) {
       console.error(e)
     } finally {
@@ -324,23 +376,56 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
 
         <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontWeight: 600, fontSize: '14px' }}>Color Palette</span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>Color Palette</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Cols</span>
+                <input 
+                  type="number" 
+                  min="1" max="6" 
+                  value={columns} 
+                  onChange={e => setColumns(Number(e.target.value) || 2)}
+                  style={{ width: '36px', fontSize: '11px', padding: '2px', background: 'var(--bg-color)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
+                />
+              </div>
+            </div>
             <button onClick={extractColors} disabled={analyzing} style={{ padding: '4px 8px' }}>
               <Palette size={14} />
             </button>
           </div>
-          {Object.keys(colors).length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {Object.entries(colors).map(([name, hex]) => hex && (
-                <div key={name} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                  <div style={{ width: '100%', aspectRatio: '1', backgroundColor: hex, borderRadius: '4px', border: '1px solid var(--border-color)' }} />
-                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{hex}</span>
+          {colors.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '8px', overflowY: 'visible' }}>
+              {colors.map((c) => (
+                <div 
+                  key={c.id} 
+                  onClick={() => handleColorClick(c.hex)}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                >
+                  <div style={{ width: '100%', aspectRatio: '1', backgroundColor: c.hex, borderRadius: '4px', border: '1px solid var(--border-color)', position: 'relative' }}>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); togglePin(c.id); }}
+                      style={{ 
+                        position: 'absolute', top: '2px', right: '2px', 
+                        background: c.isPinned ? '#fff' : 'rgba(0,0,0,0.5)',
+                        color: c.isPinned ? '#000' : '#fff',
+                        border: '1px solid rgba(255,255,255,0.2)', 
+                        borderRadius: '4px', padding: '2px',
+                        cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}
+                      title={c.isPinned ? "Unpin" : "Pin"}
+                    >
+                      <Pin size={10} fill={c.isPinned ? '#000' : 'none'} />
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{c.hex}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
 
+        {/* AI Tags Temporarily Disabled
         <div style={{ padding: '16px', flex: 1, overflowY: 'auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontWeight: 600, fontSize: '14px' }}>AI Tags</span>
@@ -385,6 +470,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
           )}
           {tagging && <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{taggingStatus || `Analyzing image with ${selectedModel}...`}</div>}
         </div>
+        */}
       </div>
     </div>
   )
