@@ -11,6 +11,7 @@ function App() {
   const [openTabs, setOpenTabs] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [picturesPath, setPicturesPath] = useState('')
+  const [isSidebarHovered, setIsSidebarHovered] = useState(false)
 
   useEffect(() => {
     // @ts-ignore
@@ -35,27 +36,33 @@ function App() {
 
   return (
     <div className="app-container">
-      <div className={`sidebar ${sidebarOpen ? '' : 'hidden'}`}>
-        <div className="sidebar-header">
-          <span style={{ fontWeight: 600 }}>Pixiv Ref</span>
-        </div>
-        <div className="sidebar-tabs">
-          <button 
-            className={`sidebar-tab ${sidebarMode === 'gallery' ? 'active' : ''}`}
-            onClick={() => setSidebarMode('gallery')}
-          >
-            Gallery
-          </button>
-          <button 
-            className={`sidebar-tab ${sidebarMode === 'downloader' ? 'active' : ''}`}
-            onClick={() => setSidebarMode('downloader')}
-          >
-            Download
-          </button>
-        </div>
-        <div className="sidebar-content">
-          {sidebarMode === 'gallery' && <Gallery onOpenImage={openImage} picturesPath={picturesPath} />}
-          {sidebarMode === 'downloader' && <Downloader />}
+      <div 
+        className={`sidebar-wrapper ${sidebarMode === 'gallery' ? 'overlay-wrapper' : ''} ${isSidebarHovered ? 'hovered' : ''}`}
+        onMouseEnter={() => sidebarMode === 'gallery' && setIsSidebarHovered(true)}
+        onMouseLeave={() => sidebarMode === 'gallery' && setIsSidebarHovered(false)}
+      >
+        <div className={`sidebar ${sidebarMode === 'gallery' ? (isSidebarHovered ? 'overlay-visible' : 'overlay-hidden') : (sidebarOpen ? '' : 'hidden')}`}>
+          <div className="sidebar-header">
+            <span style={{ fontWeight: 600 }}>Pixiv Ref</span>
+          </div>
+          <div className="sidebar-tabs">
+            <button 
+              className={`sidebar-tab ${sidebarMode === 'gallery' ? 'active' : ''}`}
+              onClick={() => { setSidebarMode('gallery'); setIsSidebarHovered(true); }}
+            >
+              Gallery
+            </button>
+            <button 
+              className={`sidebar-tab ${sidebarMode === 'downloader' ? 'active' : ''}`}
+              onClick={() => setSidebarMode('downloader')}
+            >
+              Download
+            </button>
+          </div>
+          <div className="sidebar-content">
+            {sidebarMode === 'gallery' && <Gallery onOpenImage={openImage} picturesPath={picturesPath} />}
+            {sidebarMode === 'downloader' && <Downloader />}
+          </div>
         </div>
       </div>
 
