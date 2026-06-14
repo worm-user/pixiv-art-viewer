@@ -5,6 +5,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   // const [tags, setTags] = useState<{danbooru: string, style: string} | null>(null)
   const [colors, setColors] = useState<Array<{id: string, name: string, hex: string, isPinned: boolean}>>([])
   const maxColors = 48;
+  const [sampleSize, setSampleSize] = useState(1);
   const [analyzing, setAnalyzing] = useState(false)
   // const [tagging, setTagging] = useState(false)
   // const [taggingStatus, setTaggingStatus] = useState('')
@@ -211,8 +212,35 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     if (!magnifier || !canvasRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
-    const pixel = ctx.getImageData(magnifier.natX, magnifier.natY, 1, 1).data;
-    const hex = "#" + [pixel[0], pixel[1], pixel[2]].map(x => x.toString(16).padStart(2, '0')).join('');
+    
+    let r = 0, g = 0, b = 0;
+    
+    if (sampleSize === 1) {
+      const pixel = ctx.getImageData(magnifier.natX, magnifier.natY, 1, 1).data;
+      r = pixel[0]; g = pixel[1]; b = pixel[2];
+    } else {
+      const offset = Math.floor(sampleSize / 2);
+      const startX = Math.max(0, magnifier.natX - offset);
+      const startY = Math.max(0, magnifier.natY - offset);
+      const width = Math.min(canvasRef.current.width - startX, sampleSize);
+      const height = Math.min(canvasRef.current.height - startY, sampleSize);
+      
+      const pixels = ctx.getImageData(startX, startY, width, height).data;
+      let count = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        r += pixels[i];
+        g += pixels[i+1];
+        b += pixels[i+2];
+        count++;
+      }
+      if (count > 0) {
+        r = Math.round(r / count);
+        g = Math.round(g / count);
+        b = Math.round(b / count);
+      }
+    }
+    
+    const hex = "#" + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
     
     try {
       await navigator.clipboard.writeText(hex);
@@ -324,16 +352,16 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
       {magnifier && canvasRef.current && !isDragging && (
         <div style={{
           position: 'fixed',
-          left: magnifier.x - 50,
-          top: magnifier.y - 50,
-          width: 100,
-          height: 100,
+          left: magnifier.x - 60,
+          top: magnifier.y - 60,
+          width: 120,
+          height: 120,
           borderRadius: '50%',
           border: '2px solid #000',
           pointerEvents: 'none',
           backgroundImage: `url("${imageUrl.replace(/\\/g, '/')}")`,
           backgroundSize: `${canvasRef.current.width * 10}px ${canvasRef.current.height * 10}px`,
-          backgroundPosition: `${-(magnifier.natX * 10 + 5 - 50)}px ${-(magnifier.natY * 10 + 5 - 50)}px`,
+          backgroundPosition: `${-(magnifier.natX * 10 + 5 - 60)}px ${-(magnifier.natY * 10 + 5 - 60)}px`,
           zIndex: 9999,
           imageRendering: 'pixelated',
           boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
@@ -342,7 +370,8 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
           <div style={{
             position: 'absolute',
             left: '50%', top: '50%',
-            width: 10, height: 10,
+            width: 10 * sampleSize, 
+            height: 10 * sampleSize,
             transform: 'translate(-50%, -50%)',
             border: '1px solid #000',
             boxSizing: 'border-box'
@@ -401,8 +430,23 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
 
         <div style={{ padding: '16px 16px 32px 16px', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontWeight: 600, fontSize: '14px' }}>Color Palette</span>
-            <button onClick={extractColors} disabled={analyzing} style={{ padding: '4px 8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>Color Palette</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Size</span>
+                <select 
+                  value={sampleSize} 
+                  onChange={e => setSampleSize(Number(e.target.value))}
+                  style={{ width: '40px', fontSize: '11px', padding: '2px', background: 'var(--bg-color)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
+                >
+                  <option value={1}>1</option>
+                  <option value={3}>3</option>
+                  <option value={5}>5</option>
+                  <option value={9}>9</option>
+                </select>
+              </div>
+            </div>
+            <button onClick={extractColors} disabled={analyzing} style={{ padding: '4px 8px' }} title="Auto Extract">
               <Palette size={14} />
             </button>
           </div>
