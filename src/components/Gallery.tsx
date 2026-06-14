@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Search } from 'lucide-react'
 
 export default function Gallery({ onOpenImage, picturesPath }: { onOpenImage: (filename: string) => void, picturesPath: string }) {
@@ -6,7 +6,41 @@ export default function Gallery({ onOpenImage, picturesPath }: { onOpenImage: (f
   const [search, setSearch] = useState('')
 
   const [page, setPage] = useState(1)
-  const pageSize = 50
+  const [pageSize, setPageSize] = useState(50)
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const updatePageSize = () => {
+      if (!gridRef.current) return
+      const { width, height } = gridRef.current.getBoundingClientRect()
+      
+      const minItemWidth = 120
+      const gap = 8
+      
+      let columns = Math.floor((width + gap) / (minItemWidth + gap))
+      if (columns < 1) columns = 1
+
+      const itemWidth = (width - (columns - 1) * gap) / columns
+      const itemHeight = itemWidth
+
+      let rows = Math.floor((height + gap) / (itemHeight + gap))
+      if (rows < 1) rows = 1
+
+      const newPageSize = columns * rows
+      setPageSize(prev => prev !== newPageSize ? newPageSize : prev)
+    }
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(updatePageSize)
+    })
+
+    if (gridRef.current) {
+      observer.observe(gridRef.current)
+      updatePageSize()
+    }
+
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     fetchImages()
@@ -21,7 +55,8 @@ export default function Gallery({ onOpenImage, picturesPath }: { onOpenImage: (f
 
   const filtered = images.filter(img => img.toLowerCase().includes(search.toLowerCase()))
   const totalPages = Math.ceil(filtered.length / pageSize) || 1
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const currentPage = Math.min(page, totalPages)
+  const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
@@ -36,13 +71,17 @@ export default function Gallery({ onOpenImage, picturesPath }: { onOpenImage: (f
         <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--text-secondary)' }} />
       </div>
 
-      <div style={{ 
-        flex: 1,
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', 
-        gap: '8px', 
-        alignContent: 'start',
-      }}>
+      <div 
+        ref={gridRef}
+        style={{ 
+          flex: 1,
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', 
+          gap: '8px', 
+          alignContent: 'start',
+          overflow: 'hidden',
+        }}
+      >
         {paginated.map(img => (
           <div 
             key={img} 
@@ -78,18 +117,18 @@ export default function Gallery({ onOpenImage, picturesPath }: { onOpenImage: (f
       
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, padding: '8px 0', borderTop: '1px solid var(--border-color)' }}>
         <button 
-          disabled={page === 1} 
-          onClick={() => setPage(p => Math.max(1, p - 1))}
+          disabled={currentPage === 1} 
+          onClick={() => setPage(currentPage - 1)}
           style={{ padding: '4px 12px' }}
         >
           Prev
         </button>
         <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          {page} / {totalPages}
+          {currentPage} / {totalPages}
         </span>
         <button 
-          disabled={page === totalPages} 
-          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+          disabled={currentPage === totalPages} 
+          onClick={() => setPage(currentPage + 1)}
           style={{ padding: '4px 12px' }}
         >
           Next
