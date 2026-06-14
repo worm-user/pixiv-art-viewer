@@ -4,7 +4,6 @@ import { spawn } from 'child_process'
 import { nativeImage } from 'electron'
 
 const OLLAMA_BASE = 'http://127.0.0.1:11434'
-const MODEL_NAME = 'qwen2-vl'
 
 async function isOllamaRunning(): Promise<boolean> {
   try {

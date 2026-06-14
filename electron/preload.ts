@@ -17,4 +17,6 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.removeAllListeners('analyze-progress')
   },
   extractColors: (filename: string) => ipcRenderer.invoke('extract-colors', filename),
+  copyImageToClipboard: (filename: string) => ipcRenderer.invoke('copy-image-to-clipboard', filename),
+  showInExplorer: (filename: string) => ipcRenderer.invoke('show-in-explorer', filename),
 })

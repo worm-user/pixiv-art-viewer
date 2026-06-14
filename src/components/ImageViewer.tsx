@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
-import { Copy, Zap, Palette, Pin } from 'lucide-react'
+import { Copy, Palette, Pin, FolderOpen } from 'lucide-react'
 
 export default function ImageViewer({ filename, picturesPath }: { filename: string, picturesPath: string }) {
-  const [tags, setTags] = useState<{danbooru: string, style: string} | null>(null)
+  // const [tags, setTags] = useState<{danbooru: string, style: string} | null>(null)
   const [colors, setColors] = useState<Array<{id: string, name: string, hex: string, isPinned: boolean}>>([])
-  const [columns, setColumns] = useState(2)
+  const maxColors = 48;
   const [analyzing, setAnalyzing] = useState(false)
-  const [tagging, setTagging] = useState(false)
-  const [taggingStatus, setTaggingStatus] = useState('')
-  const [availableModels, setAvailableModels] = useState<string[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('qwen2-vl')
+  // const [tagging, setTagging] = useState(false)
+  // const [taggingStatus, setTaggingStatus] = useState('')
+  // const [availableModels, setAvailableModels] = useState<string[]>([])
+  // const [selectedModel, setSelectedModel] = useState<string>('qwen2-vl')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -18,13 +18,14 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
   const [isDragging, setIsDragging] = useState(false)
   const dragStart = useRef({ x: 0, y: 0 })
+  const lastRightClick = useRef<number>(0)
 
   const imageUrl = `file://${picturesPath}\\${filename}`
 
   useEffect(() => {
     setTransform({ x: 0, y: 0, scale: 1 });
     setColors([]);
-    setTags(null);
+    // setTags(null);
     let isMounted = true;
     
     // Auto-extract colors
@@ -35,10 +36,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
         .filter(([_, hex]) => hex)
         .map(([name, hex]) => ({ id: Math.random().toString(), name, hex, isPinned: false }));
       
-      setColors(prev => {
-        const maxColors = columns * 3;
-        return initialColors.slice(0, maxColors);
-      });
+      setColors(initialColors.slice(0, maxColors));
     }).catch(console.error);
 
     canvasRef.current = null;
@@ -72,6 +70,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     }, 2500)
   }
 
+  /*
   useEffect(() => {
     setTaggingStatus('')
 
@@ -97,18 +96,29 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
       window.api.removeAnalyzeProgress()
     }
   }, [filename])
+  */
 
   const copyToClipboard = async () => {
     try {
-      const response = await fetch(imageUrl)
-      const blob = await response.blob()
-      await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob })
-      ])
-      showToast('Copied image to clipboard!')
+      // @ts-ignore
+      const success = await window.api.copyImageToClipboard(filename)
+      if (success) {
+        showToast('Copied image to clipboard!')
+      } else {
+        showToast('Failed to copy image.')
+      }
     } catch (e) {
       console.error(e)
       showToast('Failed to copy image.')
+    }
+  }
+
+  const openInExplorer = async () => {
+    try {
+      // @ts-ignore
+      await window.api.showInExplorer(filename)
+    } catch (e) {
+      console.error(e)
     }
   }
 
@@ -134,21 +144,25 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0) { // left click
-      setIsDragging(true);
-      dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    if (e.button === 2) { // right click
+      const now = Date.now();
+      if (now - lastRightClick.current < 300) {
+        setTransform({ x: 0, y: 0, scale: 1 });
+        lastRightClick.current = 0;
+        setIsDragging(false);
+      } else {
+        lastRightClick.current = now;
+        setIsDragging(true);
+        dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+      }
+    } else if (e.button === 0) { // left click
+      handleImageClick();
     }
   }
 
   const handleMouseUp = (e: React.MouseEvent) => {
-    if (e.button === 0) {
+    if (e.button === 2) {
       setIsDragging(false);
-    }
-  }
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    if (e.button === 0) {
-      setTransform({ x: 0, y: 0, scale: 1 });
     }
   }
 
@@ -204,19 +218,26 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
       await navigator.clipboard.writeText(hex);
       showToast(`Copied color ${hex}`);
       setColors(prev => {
-        if (prev.some(c => c.hex.toLowerCase() === hex.toLowerCase())) return prev;
+        const existingIndex = prev.findIndex(c => c.hex.toLowerCase() === hex.toLowerCase());
+        let next: typeof prev;
         
-        const newColor = { id: Math.random().toString(), name: 'Picked', hex, isPinned: false };
-        let next = [...prev, newColor];
-        const maxColors = columns * 3;
+        if (existingIndex !== -1) {
+          const existingColor = prev[existingIndex];
+          next = [...prev];
+          next.splice(existingIndex, 1);
+          next.unshift(existingColor);
+        } else {
+          const newColor = { id: Math.random().toString(), name: 'Picked', hex, isPinned: false };
+          next = [newColor, ...prev];
+        }
         
         if (next.length > maxColors) {
           const excess = next.length - maxColors;
           const unpinnedIndices = next
-            .map((c, i) => (!c.isPinned && i < next.length - 1 ? i : -1))
+            .map((c, i) => (!c.isPinned ? i : -1))
             .filter(i => i !== -1);
-          
-          let toRemove = unpinnedIndices.slice(0, excess);
+            
+          const toRemove = unpinnedIndices.slice(-excess);
           return next.filter((_, i) => !toRemove.includes(i));
         }
         return next;
@@ -243,13 +264,10 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     setAnalyzing(true)
     try {
       // @ts-ignore
-      const res = await window.api.extractColors(filename)
+      const res = (await window.api.extractColors(filename)) as Record<string, string>;
       const newColors = Object.entries(res).filter(([_, hex]) => hex).map(([name, hex]) => ({ id: Math.random().toString(), name, hex, isPinned: false }));
       
-      setColors(prev => {
-        const maxColors = columns * 3;
-        return newColors.slice(0, maxColors);
-      });
+      setColors(newColors.slice(0, maxColors));
     } catch (e) {
       console.error(e)
     } finally {
@@ -257,6 +275,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
     }
   }
 
+  /*
   const analyzeTags = async () => {
     setTagging(true)
     setTaggingStatus('Starting analysis...')
@@ -277,6 +296,7 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
       setTagging(false)
     }
   }
+  */
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
@@ -339,15 +359,16 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
           justifyContent: 'center', 
           background: 'var(--bg-color)', 
           overflow: 'hidden',
-          cursor: isDragging ? 'grabbing' : (magnifier ? 'none' : 'grab')
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          cursor: isDragging ? 'grabbing' : (magnifier ? 'none' : 'crosshair')
         }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={(e) => { handleMouseUp(e); setMagnifier(null); }}
-        onContextMenu={(e) => { e.preventDefault(); handleImageClick(); }}
-        onDoubleClick={handleDoubleClick}
+        onContextMenu={(e) => { e.preventDefault(); }}
       >
         <img 
           ref={imageRef}
@@ -372,51 +393,44 @@ export default function ImageViewer({ filename, picturesPath }: { filename: stri
             <Copy size={16} />
             <span style={{ fontSize: '13px' }}>Copy Image</span>
           </button>
+          <button onClick={openInExplorer} title="Open in Explorer" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '8px', alignItems: 'center' }}>
+            <FolderOpen size={16} />
+            <span style={{ fontSize: '13px' }}>Open Folder</span>
+          </button>
         </div>
 
-        <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
+        <div style={{ padding: '16px 16px 32px 16px', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600, fontSize: '14px' }}>Color Palette</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Cols</span>
-                <input 
-                  type="number" 
-                  min="1" max="6" 
-                  value={columns} 
-                  onChange={e => setColumns(Number(e.target.value) || 2)}
-                  style={{ width: '36px', fontSize: '11px', padding: '2px', background: 'var(--bg-color)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
-                />
-              </div>
-            </div>
+            <span style={{ fontWeight: 600, fontSize: '14px' }}>Color Palette</span>
             <button onClick={extractColors} disabled={analyzing} style={{ padding: '4px 8px' }}>
               <Palette size={14} />
             </button>
           </div>
           {colors.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '8px', overflowY: 'visible' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', overflowY: 'visible' }}>
               {colors.map((c) => (
                 <div 
                   key={c.id} 
                   onClick={() => handleColorClick(c.hex)}
+                  onContextMenu={(e) => { e.preventDefault(); togglePin(c.id); }}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                  title={c.hex}
                 >
-                  <div style={{ width: '100%', aspectRatio: '1', backgroundColor: c.hex, borderRadius: '4px', border: '1px solid var(--border-color)', position: 'relative' }}>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); togglePin(c.id); }}
-                      style={{ 
+                  <div style={{ 
+                    width: '100%', aspectRatio: '1', backgroundColor: c.hex, 
+                    borderRadius: '4px', border: c.isPinned ? '2px solid #fff' : '1px solid var(--border-color)', 
+                    position: 'relative',
+                    boxShadow: c.isPinned ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
+                    transition: 'all 0.2s'
+                  }}>
+                    {c.isPinned && (
+                      <div style={{ 
                         position: 'absolute', top: '2px', right: '2px', 
-                        background: c.isPinned ? '#fff' : 'rgba(0,0,0,0.5)',
-                        color: c.isPinned ? '#000' : '#fff',
-                        border: '1px solid rgba(255,255,255,0.2)', 
-                        borderRadius: '4px', padding: '2px',
-                        cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}
-                      title={c.isPinned ? "Unpin" : "Pin"}
-                    >
-                      <Pin size={10} fill={c.isPinned ? '#000' : 'none'} />
-                    </button>
+                        color: '#fff', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))'
+                      }}>
+                        <Pin size={12} fill="#fff" />
+                      </div>
+                    )}
                   </div>
                   <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{c.hex}</span>
                 </div>

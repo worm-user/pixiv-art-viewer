@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, clipboard, nativeImage, shell } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { openPixivLoginWindow } from './pixivAuth'
@@ -35,7 +35,7 @@ async function saveConfig(config: Record<string, any>) {
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC || '', 'electron-vite.svg'),
     width: 1200,
     height: 900,
     backgroundColor: '#121212',
@@ -52,7 +52,7 @@ function createWindow() {
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    win.loadFile(path.join(process.env.DIST, 'index.html'))
+    win.loadFile(path.join(process.env.DIST || '', 'index.html'))
   }
 }
 
@@ -142,6 +142,29 @@ app.whenReady().then(() => {
   ipcMain.handle('extract-colors', async (_, filename: string) => {
     const imagePath = path.join(getPicturesPath(), filename)
     return await extractColors(imagePath)
+  })
+
+  ipcMain.handle('copy-image-to-clipboard', async (_, filename: string) => {
+    try {
+      const imagePath = path.join(getPicturesPath(), filename)
+      const image = nativeImage.createFromPath(imagePath)
+      clipboard.writeImage(image)
+      return true
+    } catch (e) {
+      console.error(e)
+      return false
+    }
+  })
+
+  ipcMain.handle('show-in-explorer', async (_, filename: string) => {
+    try {
+      const imagePath = path.join(getPicturesPath(), filename)
+      shell.showItemInFolder(imagePath)
+      return true
+    } catch (e) {
+      console.error(e)
+      return false
+    }
   })
 
   createWindow()
